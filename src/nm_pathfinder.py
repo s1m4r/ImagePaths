@@ -1,10 +1,10 @@
 # MESH REFERENCE
 # Mesh: {
-#    "boxes_discovered": [
+#    "parent": [
 #          (x1, x2, y1, y2), ...  # box coordinates
 #               ],
 #   "adj":  {
-#            (x1, x2, y1, y2): [(a1, a2, b1, b2), (c1, c2, d1, d2)], ...  # edges between boxes_discovered
+#            (x1, x2, y1, y2): [(a1, a2, b1, b2), (c1, c2, d1, d2)], ...  # edges between parent
 #           }
 from math import inf, sqrt
 from heapq import heappop, heappush
@@ -22,62 +22,88 @@ def find_path (source_point, destination_point, mesh):
     Returns:
 
         A path (list of points) from source_point to destination_point if exists
-        A list of boxes_discovered explored by the algorithm
+        A list of parent explored by the algorithm
     """
-    # Find the boxes_discovered that contain the source and destination points
-    starting_box = find_box(source_point, mesh) # starting box
-    destination_box = find_box(destination_point, mesh) # destination box
+    start_box = find_box(source_point, mesh) # starting box
+    end_box = find_box(destination_point, mesh) # destination box
 
-    if( not starting_box or not destination_box):
+    if( not start_box or not end_box): # if either the start or end box is not found, end
         print("Path not Found")
         return [], []
 
+    # ----- VARIABLES TO RETURN -----
     path = [] # final path
-    boxes_discovered = {} # maps explored box to its parent
     boxes = {} # boxes actually dequeued from the queue
+    # -------------------------------
 
-    detail_point = {} # maps box to its detail point
-    start_pathcosts = {starting_box: 0}       # maps boxes_discovered to their pathcosts (found so far)
-    total_pathcosts = {starting_box: dist(source_point, destination_point)}  # maps boxes_discovered to their total path costs (including distance to destination)
+    # --- BIDIRECTIONAL SEARCH OBJECTS ---
+    forward_discover = {start_box: None} # maps explored box to its parent, in forward direction
+    backward_discover = {end_box: None} # maps explored box to its parent, in backward direction
 
-    queue = [] # queue of boxes_discovered to explore, and other info added as needed
+    forward_cost = {start_box: 0}  # maps box to pathcosts (from start) in forward direction
+    backward_cost = {end_box: 0}  # maps box to pathcosts (from start) in backward direction
+
+    forward_total = {start_box: dist(source_point, destination_point)}  # maps box to total pathcosts (from start to end) forward direction
+    backward_total = {end_box: dist(source_point, destination_point)}  # maps box to total pathcosts (from start to end) backward direction
+    # -------------------------------------
     
-    boxes_discovered[starting_box] = None # mark the starting box as explored, recording parent as None
-    detail_point[starting_box] = source_point  # Store the detail point of the starting box
+    # ----------- SHARED OBJECTS -----------
+    detail_point = {start_box: source_point,
+                    end_box: destination_point} # maps box to its detail point
+    queue = [] # queue of boxes to explore, sorted by priority (total cost)
+    # --------------------------------------
     
-    heappush(queue, (dist(source_point, destination_point), starting_box))  # maintain a priority queue of cells
+    # ------- INITAILIZE VALUES ------- 
+    heappush(queue, (dist(source_point, destination_point), start_box, "forward"))  # maintain a priority queue of boxes
+    heappush(queue, (dist(destination_point, source_point), end_box, "backward"))  # format: (priority, box, direction)
+    # ---------------------------------
     
+    # ----------- MAIN LOOP -----------
     while queue:
-        distance, current_box = heappop(queue)
-        boxes[current_box] = boxes_discovered[current_box]  # Store the detail point for the current box
+        distance, current_box, direction = heappop(queue) 
+        boxes[current_box] = None # Mark the current box as discovered
 
-        if current_box == destination_box:
-            # If we reached the destination box, backtrack to find the path
-            while current_box is not None:
-                path.append(detail_point[current_box])  # Append the xy-coordinates of the box
-                current_box = boxes_discovered[current_box]
-            path.reverse()  # Reverse the path to get it from source to destination  
-            path.append(destination_point)  # Append the destination point
-            break        
+        if direction == "forward" and current_box in backward_discover: # if a shared box is found
+            path = find_final_path(current_box, forward_discover, backward_discover, detail_point)  # find the path from source to destination
+            break
+
+        if direction == "backward" and current_box in forward_discover: # if a shared box is found
+            path = find_final_path(current_box, forward_discover, backward_discover, detail_point)  # find the path from source to destination
+            break
+        
+        # ----------- DISCOVER CHILDREN --------------
         for adjacent_box in mesh["adj"][current_box]:
-            potential_detail_point = calculate_detail_point(adjacent_box, current_box, detail_point[current_box])
-            cost_to_child = start_pathcosts[current_box] + dist(detail_point[current_box], potential_detail_point)
-            total_cost = cost_to_child + dist(potential_detail_point, destination_point)
 
-            if adjacent_box not in start_pathcosts or total_cost < total_pathcosts[adjacent_box]:
+            if direction == "forward": # set objects based on the direction of search
+                cost = forward_cost
+                cost_total = forward_total
+                parent = forward_discover
+                goal_point = destination_point
+            elif direction == "backward":
+                cost = backward_cost
+                cost_total = backward_total
+                parent = backward_discover
+                goal_point = source_point
+
+            # calculate the detail point & costs
+            potential_detail_point = calculate_detail_point(adjacent_box, current_box, detail_point[current_box])
+            cost_to_child = cost[current_box] + dist(detail_point[current_box], potential_detail_point)
+            total_cost = cost_to_child + dist(potential_detail_point, goal_point)
+
+            # add new child IF it has not been discovered or if the new cost is lower than the previously discovered cost
+            if adjacent_box not in cost_total or total_cost < cost_total[adjacent_box]:
                 detail_point[adjacent_box] = potential_detail_point  # update the detail point
-                start_pathcosts[adjacent_box] = cost_to_child  # update the cost
-                boxes_discovered[adjacent_box] = current_box  # set the backpointer 
-                total_pathcosts[adjacent_box] = total_cost  # update the total cost
+                cost[adjacent_box] = cost_to_child  # update the cost
+                parent[adjacent_box] = current_box  # set the backpointer 
+                cost_total[adjacent_box] = total_cost  # update the total cost
                 
-                heappush(queue, (total_pathcosts[adjacent_box], adjacent_box))  # put the child on the priority queue
-                
-    # If we reach here, it means we didn't find a path
-    if not path:
+                heappush(queue, (cost_total[adjacent_box], adjacent_box, direction))  # put the child on the priority queue
+
+    if not path: # if no path was found
         print("No path found")
         return [], boxes.keys()
 
-    return path, boxes.keys()
+    return path, boxes.keys() # DONE :)
 
 def find_box(point, mesh):
     """
@@ -85,7 +111,7 @@ def find_box(point, mesh):
 
     Args:
         point: the point to find the box for
-        mesh: the mesh containing boxes_discovered
+        mesh: the mesh containing parent
 
     Returns:
         The box that contains the point, or None if not found
@@ -102,14 +128,14 @@ def find_box(point, mesh):
 
 def calculate_detail_point(box1, box2, point):
     """
-    Calculates a detail point between two boxes_discovered
+    Calculates a detail point between two boxes
 
     Args:
         box1: the first box
         box2: the second box
 
     Returns:
-        A detail point (x, y) between the two boxes_discovered
+        A detail point (x, y) between the two boxes
     """
     # Initialize the values
     x1, x2, y1, y2 = box1
@@ -118,7 +144,7 @@ def calculate_detail_point(box1, box2, point):
     x_coord = 0
     y_coord = 0
     
-    # Calculate the intersection range of the two boxes_discovered
+    # Calculate the intersection range of the two parent
     x_range = (max(x1, x3), min(x2, x4))
     y_range = (max(y1, y3), min(y2, y4))
 
@@ -151,3 +177,40 @@ def dist(point1, point2):
         The Euclidean distance between the two points.
     """
     return sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
+
+def find_final_path(shared_box, forward_discover, backward_discover, detail_point):
+    """
+    Finds the path from the source to the destination using the parent and their detail points.
+
+    Args:
+        shared_box: The current box in both forward and backward searches
+        forward_discover: The parent explored in the forward direction
+        backward_discover: The parent explored in the backward direction
+
+    Returns:
+        A list of points representing the path from source to destination.
+    """    
+    path = []  # Initialize the path list
+
+    # ---------- FORWARD SEARCH BACKTRACKING ----------
+    box = forward_discover[shared_box]  # Start from the parent of the shared box in forward search
+    path.append(calculate_detail_point(shared_box, box, detail_point[shared_box])) # manually add the shared box detail point (may not exist)
+    
+    while box is not None:
+        path.append(detail_point[box])
+        box = forward_discover[box]
+
+    # Reverse the path to get it from source to destination
+    path.reverse()
+    # ---------------------------------------------------
+    
+    # ---------- BACKWARD SEARCH BACKTRACKING ----------
+    box = backward_discover[shared_box]
+    path.append(calculate_detail_point(shared_box, box, detail_point[shared_box])) # manually add second detail point for shared box (may not exist)
+
+    while box is not None:
+        path.append(detail_point[box])
+        box = backward_discover[box] 
+    # ---------------------------------------------------  
+  
+    return path
