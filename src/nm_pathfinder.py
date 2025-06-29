@@ -34,9 +34,7 @@ def find_path (source_point, destination_point, mesh):
 
     path = [] # final path
     boxes_discovered = {} # maps explored box to its parent
-    boxes = {}
-
-
+    boxes = {} # boxes actually dequeued from the queue
 
     detail_point = {} # maps box to its detail point
     start_pathcosts = {starting_box: 0}       # maps boxes_discovered to their pathcosts (found so far)
@@ -45,7 +43,7 @@ def find_path (source_point, destination_point, mesh):
     queue = [] # queue of boxes_discovered to explore, and other info added as needed
     
     boxes_discovered[starting_box] = None # mark the starting box as explored, recording parent as None
-    detail_point[starting_box] = source_point  # Store the midpoint of the starting box
+    detail_point[starting_box] = source_point  # Store the detail point of the starting box
     
     heappush(queue, (dist(source_point, destination_point), starting_box))  # maintain a priority queue of cells
     
